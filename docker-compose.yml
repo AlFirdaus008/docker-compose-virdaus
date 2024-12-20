@@ -1,0 +1,109 @@
+version: "3.8"
+
+name: web-database-infrastructure
+
+# Services Configuration
+services:
+  # Web Server Service (NGINX)
+  webserver:
+    image: nginx:latest
+    container_name: nginx-web
+    ports:
+      - "8080:80"
+    volumes:
+      - ./nginx-config:/etc/nginx/conf.d
+      - ./web-content:/usr/share/nginx/html
+    networks:
+      - web-network
+    depends_on:
+      - backend
+      - database
+    configs:
+      - source: nginx-config
+        target: /etc/nginx/conf.d/default.conf
+
+  # Backend Service (Node.js)
+  backend:
+    image: node:16-alpine
+    container_name: nodejs-backend
+    working_dir: /app
+    volumes:
+      - ./backend:/app
+    networks:
+      - web-network
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - DB_HOST=database
+      - DB_USER=webuser
+      - DB_PASSWORD=userpassword
+      - DB_NAME=mywebapp
+      - RABBITMQ_HOST=message-queue
+    command: sh -c "npm install && npm start"
+    depends_on:
+      - database
+      - message-queue
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
+
+  # Database Service (MySQL)
+  database:
+    image: mysql:8.0
+    container_name: mysql-database
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: mywebapp
+      MYSQL_USER: webuser
+      MYSQL_PASSWORD: userpassword
+    ports:
+      - "3307:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./mysql-init:/docker-entrypoint-initdb.d
+    networks:
+      - web-network
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 1G
+    configs:
+      - source: mysql-init-script
+        target: /docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # Message Queue Service (RabbitMQ)
+  message-queue:
+    image: rabbitmq:management
+    container_name: rabbitmq-service
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    networks:
+      - web-network
+    restart: always
+
+# Networks Configuration
+networks:
+  web-network:
+    driver: bridge
+
+# Volumes Configuration
+volumes:
+  mysql-data:
+    driver: local
+
+# Configs Configuration
+configs:
+  nginx-config:
+    file: ./nginx-config/default.conf
+  mysql-init-script:
+    file: ./mysql-init/init.sql
